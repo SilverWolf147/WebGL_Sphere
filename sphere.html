@@ -1,0 +1,250 @@
+<!doctype html>
+<html>
+   <body>
+    <canvas width = "600" height = "600" style="border:1px solid #000000" id="sphere_canvas"></canvas>
+
+    <script>
+		var gl1;
+
+		function initgl1(canvas) {
+			try {
+				gl1 = canvas.getContext("experimental--webgl1");
+				gl1.viewportWidth = canvas.width;
+				gl1.viewportHeight = canvas.height;
+			} catch (e) {
+			}
+			if (!gl1) {
+				alert("we Couldnt initialise Webgl1 , sorry :-(");
+			}
+		}
+
+
+		function getShader(gl1, id) {
+			var shaderScript = document.getElementById(id);
+			if (!shaderScript) {
+				return null;
+			}
+
+			var str = "";
+			var k = shaderScript.firstChild;
+			while (k) {
+				if (k.nodeType == 3) {
+					str += k.textContent;
+				}
+				k = k.nextSibling;
+			}
+
+			var shader;
+			if (shaderScript.type == "x- shader/x-fragment") {
+				shader = gl1.createShader(gl1.FRAGMENT_SHADER);
+			} else if (shaderScript.type == "x- shader/x-vertex") {
+				shader = gl1.createShader(gl1.VERTEX_SHADER);
+			} else {
+				return null;
+			}
+
+			gl1.shaderSource(shader, str);
+			gl1.compileShader(shader);
+
+			if (!gl1.getShaderParameter(shader, gl1.COMPILE_STATUS)) {
+				alert(gl1.getShaderInfoLog(shader));
+				return null;
+			}
+
+			return shader;
+		}
+
+
+		var shaderProgram;
+
+		function initShaders() {
+			var fragmentShader = getShader(gl1, "shader-fs");
+			var vertexShader = getShader(gl1, "shader-vs");
+
+			shaderProgram = gl1.createProgram();
+			gl1.attachShader(shaderProgram, vertexShader);
+			gl1.attachShader(shaderProgram, fragmentShader);
+			gl1.linkProgram(shaderProgram);
+
+			if (!gl1.getProgramParameter(shaderProgram, gl1.LINK_STATUS)) {
+				alert("Could not initialise shaders");
+			}
+
+			gl1.useProgram(shaderProgram);
+
+			shaderProgram.vertexPositionAttribute = gl1.getAttribLocation(shaderProgram, "aVertexPosition");
+			gl1.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+			shaderProgram.vertexColorAttribute = gl1.getAttribLocation(shaderProgram, "aVertexColor");
+			gl1.enableVertexAttribArray(shaderProgram.vertexColorAttribute);
+
+			shaderProgram.pMatrixUniform = gl1.getUniformLocation(shaderProgram, "uPMatrix");
+			shaderProgram.mvMatrixUniform = gl1.getUniformLocation(shaderProgram, "uMVMatrix");
+		}
+
+
+		var mvMatrix = mat4.create();
+		var mvMatrixStack = [];
+		var pMatrix = mat4.create();
+
+		function mvPushMatrix() {
+			var copy = mat4.create();
+			mat4.copy(copy, mvMatrix);
+			mvMatrixStack.push(copy);
+		}
+
+		function mvPopMatrix() {
+			if (mvMatrixStack.length == 0) {
+				throw "Invalid popMatrix!";
+			}
+			mvMatrix = mvMatrixStack.pop();
+		}
+
+
+		function setMatrixUniforms() {
+			gl1.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+			gl1.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+		}
+
+
+		function degToRad(degrees) {
+			return degrees * Math.PI / 180;
+		}
+
+		var sphereVertexPositionBuffer;
+		var sphereVertexColorBuffer;
+		var sphereVertexIndexBuffer;
+
+		function initBuffers() {
+			var latitudeBands = 10;
+			var longitudeBands = 10;
+			var radius = 2;
+
+			sphereVertexPositionBuffer = gl1.createBuffer();
+			gl1.bindBuffer(gl1.ARRAY_BUFFER, sphereVertexPositionBuffer);
+			sphereVertexColorBuffer = gl1.createBuffer();
+			gl1.bindBuffer(gl1.ARRAY_BUFFER, sphereVertexColorBuffer);
+			sphereVertexIndexBuffer = gl1.createBuffer();
+			gl1.bindBuffer(gl1.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+
+			var vertexPositionData = [];
+			var colors = [];
+			var indexData = [];
+			for (var latNumber=0; latNumber < latitudeBands; latNumber++) {
+				var theta = latNumber * Math.PI / latitudeBands;
+				var sinTheta = Math.sin(theta);
+				var cosTheta = Math.cos(theta);
+
+				for (var longNumber=0; longNumber < longitudeBands; longNumber++) {
+					var phi = longNumber * 2 * Math.PI / longitudeBands;
+					var sinPhi = Math.sin(phi);
+					var cosPhi = Math.cos(phi);
+
+					var x = cosPhi * sinTheta;
+					var y = cosTheta;
+					var z = sinPhi * sinTheta;
+
+					colors = [[1.0, 1.0, 0.3, 1.0]];
+					vertexPositionData.push(radius * x);
+					vertexPositionData.push(radius * y);
+					vertexPositionData.push(radius * z);
+
+					var first = (latNumber * (longitudeBands + 1)) + longNumber;
+					var second = first + longitudeBands + 1;
+					indexData.push(first);
+					indexData.push(second);
+					indexData.push(first + 1);
+
+					indexData.push(second);
+					indexData.push(second + 1);
+					indexData.push(first + 1);
+				}
+			}
+
+			var unpackedColors = [];
+			for (var i in colors) {
+				var color = colors[i];
+				for (var j=0; j < 4; j++) {
+					unpackedColors = unpackedColors.concat(color);
+				}
+			}
+
+			gl1.bufferData(gl1.ARRAY_BUFFER, new Float32Array(vertexPositionData), gl1.STATIC_DRAW);
+			sphereVertexPositionBuffer.itemSize = 3;
+			sphereVertexPositionBuffer.numItems = vertexPositionData.length / 3;
+
+			gl1.bufferData(gl1.ARRAY_BUFFER, new Float32Array(unpackedColors), gl1.STATIC_DRAW);
+			sphereVertexColorBuffer.itemSize = 4;
+			sphereVertexColorBuffer.numItems = unpackedColors.length / 4;
+
+			gl1.bufferData(gl1.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexData), gl1.STATIC_DRAW);
+			sphereVertexIndexBuffer.itemSize = 1;
+			sphereVertexIndexBuffer.numItems = indexData.length;
+
+		}
+
+
+		var rSphere = 0;
+
+		function drawScene() {
+			gl1.viewport(0, 0, gl1.viewportWidth, gl1.viewportHeight);
+			gl1.clear(gl1.COLOR_BUFFER_BIT | gl1.DEPTH_BUFFER_BIT);
+
+			mat4.perspective(pMatrix, 60, gl1.viewportWidth / gl1.viewportHeight, 0.1, 100.0);
+
+			mat4.identity(mvMatrix);
+
+			mat4.translate(mvMatrix, mvMatrix, [0.0, 0.0, -5.0]);
+
+			mvPushMatrix();
+			mat4.rotate(mvMatrix, mvMatrix, degToRad(rSphere), [1, 1, 1]);
+
+			gl1.bindBuffer(gl1.ARRAY_BUFFER, sphereVertexPositionBuffer);
+			gl1.vertexAttribPointer(shaderProgram.vertexPositionAttribute, sphereVertexPositionBuffer.itemSize, gl1.FLOAT, false, 0, 0);
+
+			gl1.bindBuffer(gl1.ARRAY_BUFFER, sphereVertexColorBuffer);
+			gl1.vertexAttribPointer(shaderProgram.vertexColorAttribute, sphereVertexColorBuffer.itemSize, gl1.FLOAT, false, 0, 0);
+
+			gl1.bindBuffer(gl1.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
+			setMatrixUniforms();
+			gl1.drawElements(gl1.TRIANgl1ES, sphereVertexIndexBuffer.numItems, gl1.UNSIGNED_SHORT, 0);
+
+			mvPopMatrix();
+
+		}
+
+
+		var lastTime = 0;
+
+		function animate() {
+			var timeNow = new Date().getTime();
+			if (lastTime != 0) {
+				var elapsed = timeNow - lastTime;
+
+				rSphere -= (75 * elapsed) / 1000.0;
+			}
+			lastTime = timeNow;
+		}
+
+
+		function tick() {
+			requestAnimFrame(tick);
+			drawScene();
+			animate();
+		}
+
+
+		function webgl1Start() {
+			var canvas = document.getElementById("sphere_canvas");
+			initgl1(canvas);
+			initShaders()
+			initBuffers();
+
+			gl1.clearColor(0.0, 0.0, 0.1, 1.0);
+			gl1.enable(gl1.DEPTH_TEST);
+
+			tick();
+		}
+	</script>
+   </body>
+</html>
